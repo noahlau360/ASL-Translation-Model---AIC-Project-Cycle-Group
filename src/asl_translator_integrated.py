@@ -14,6 +14,18 @@ from mediapipe.tasks.python import vision
 import joblib
 from collections import deque
 
+# for switch control
+import time
+import asyncio
+from dotenv import load_dotenv
+from tplinkcloud import TPLinkDeviceManager
+
+# intializing codes for smart switch
+load_dotenv()
+KASA_USER = os.getenv("KASA_USER")
+KASA_PASS = os.getenv("KASA_PASS")
+DEVICE_NAME = os.getenv("DEVICE_NAME")
+
 
 class ASLRecognizer:
     """Handles ASL recognition using MediaPipe and trained model"""
@@ -156,6 +168,28 @@ class CameraThread(QThread):
         self._running = False
         self.wait()
 
+async def _kasa_control(action: str) -> bool:
+    device_manager = TPLinkDeviceManager(KASA_USER, KASA_PASS)
+    devices = await device_manager.get_devices()
+    for d in devices:
+        if d.get_alias() == DEVICE_NAME:
+            if action == "on":
+                await d.power_on()
+            elif action == "off":
+                await d.power_off()
+            return True
+    return False
+
+class KasaThread(QThread):
+    finished = pyqtSignal(str, bool)  # (action, success)
+
+    def __init__(self, action: str):
+        super().__init__()
+        self.action = action
+
+    def run(self):
+        success = asyncio.run(_kasa_control(self.action))
+        self.finished.emit(self.action, success)
 
 # Command mappings
 COMMANDS: dict[str, str] = {}
@@ -179,6 +213,9 @@ class ASLTranslatorApp(QMainWindow):
         self.recording = False
         self.recorded_frames = []
         self._toggle_index: dict[str, int] = {}
+
+        self._last_command_time: dict[str, float] = {}
+        self._kasa_thread: KasaThread | None = None
         
         # Initialize ASL recognizer
         self.recognizer = ASLRecognizer()
@@ -516,22 +553,48 @@ class ASLTranslatorApp(QMainWindow):
         self.cmd_input.clear()
 
         if text in TOGGLE_COMMANDS:
+            cooldown = 2.0
+            if time.time() - self._last_command_time.get(text, 0) < cooldown:
+                return
+            self._last_command_time[text] = time.time()
+
             states = TOGGLE_COMMANDS[text]
             idx = self._toggle_index.get(text, 0)
             response = states[idx]
             self._toggle_index[text] = (idx + 1) % len(states)
+
+            if text == "light":
+                self.footer.setText(f'Sending "{response}" to {DEVICE_NAME}…')
+                self._kasa_thread = KasaThread(response)
+                self._kasa_thread.finished.connect(self._on_kasa_done)
+                self._kasa_thread.start()
         elif text in COMMANDS:
             response = COMMANDS[text]
         else:
             response = f'[unknown command: "{text}"]'
 
         print(f"INPUT:  {text}")
-        print(f"OUTPUT: {response}")
+        print(f"OUTPUT: {response if text not in TOGGLE_COMMANDS or text != 'light' else '(kasa async)'}")
 
-        self.output.append(f"<b>&gt; {text}</b>")
-        self.output.append(f"{response}\n")
-        self.signs.setText(response)
-        self.footer.setText(f'Command "{text}" → "{response}"')
+        if text != "light":
+            self.output.append(f"<b>&gt; {text}</b>")
+            self.output.append(f"{response}\n")
+            self.signs.setText(response)
+            self.footer.setText(f'Command "{text}" → "{response}"')
+        else:
+            self.output.append(f"<b>&gt; {text}</b>")
+            self.output.append(f"Sending to device…\n")
+            self.signs.setText("…")
+
+    def _on_kasa_done(self, action: str, success: bool):
+        if success:
+            self.output.append(f"Light turned {action}.\n")
+            self.signs.setText(action)
+            self.footer.setText(f'Light turned {action}.')
+        else:
+            self.output.append(f'[Device "{DEVICE_NAME}" not found]\n')
+            self.signs.setText("error")
+            self.footer.setText(f'Could not reach "{DEVICE_NAME}".')
 
     def _clear(self):
         self.output.clear()
