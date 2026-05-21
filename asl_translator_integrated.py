@@ -18,12 +18,12 @@ from collections import deque
 class ASLRecognizer:
     """Handles ASL recognition using MediaPipe and trained model"""
     
-    def __init__(self, model_path=os.path.join(os.path.dirname(__file__), 'classifier.joblib')):
+    def __init__(self, model_path=os.path.join(os.path.dirname(__file__), 'classifier_improved_2.joblib')):
         self.model = None
         self.feature_columns = None
         self.label_encoder = None
         self.landmarker = None
-        
+
         # Initialize MediaPipe
         self._init_mediapipe()
         
@@ -49,6 +49,7 @@ class ASLRecognizer:
         except Exception as e:
             print(f"⚠ MediaPipe initialization failed: {e}")
             self.landmarker = None
+
     
     def _load_model(self, model_path):
         """Load the trained ASL classifier model"""
@@ -76,7 +77,7 @@ class ASLRecognizer:
         """Extract hand landmarks from a frame using MediaPipe"""
         if self.landmarker is None:
             return None
-        
+
         try:
             # Convert to RGB and create MediaPipe Image
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -91,16 +92,8 @@ class ASLRecognizer:
             # Get first hand's landmarks
             hand_landmarks = detection_result.hand_landmarks[0]
             
-            # Extract x, y, z coordinates (63 features total)
+            # Extract x, y, z coordinates (63 features total) — raw, no normalization
             coords = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks])
-
-            # Normalize: make all points relative to the wrist (landmark 0)
-            # then scale by the hand span so distance from camera doesn't matter
-            coords -= coords[0]
-            scale = np.max(np.abs(coords))
-            if scale > 0:
-                coords /= scale
-
             landmarks_flat = coords.flatten().tolist()
             return landmarks_flat if len(landmarks_flat) == 63 else None
             
@@ -114,8 +107,9 @@ class ASLRecognizer:
             return None, 0.0, []
         
         try:
-            # Get probabilities
-            probabilities = self.model.predict_proba(np.array([landmarks]))[0]
+            import pandas as pd
+            X = pd.DataFrame([landmarks], columns=self.feature_columns)
+            probabilities = self.model.predict_proba(X)[0]
             certainty = np.max(probabilities) * 100
 
             classes = self.model.classes_
@@ -170,6 +164,12 @@ TOGGLE_COMMANDS: dict[str, list[str]] = {
     "light": ["on", "off"],
 }
 
+# Sign sequence triggers: map a tuple of signs (in order) to a terminal message
+SIGN_SEQUENCES: dict[tuple, str] = {
+    ("o", "n"): "Sequence detected: ON",
+    ("o", "c"): "yay",
+}
+
 
 class ASLTranslatorApp(QMainWindow):
     def __init__(self):
@@ -185,6 +185,16 @@ class ASLTranslatorApp(QMainWindow):
         
         # Buffer for averaging predictions
         self.prediction_buffer = deque(maxlen=5)
+
+        # History of detected signs across recordings, for sequence matching
+        max_seq_len = max((len(k) for k in SIGN_SEQUENCES), default=1)
+        self.sign_history: deque[str] = deque(maxlen=max_seq_len)
+
+        # Live real-time detection state
+        self._live_frame_count = 0
+        self._live_buffer: deque = deque(maxlen=18)   # rolling per-frame predictions
+        self._last_stable_sign: str | None = None     # last sign that was "confirmed"
+        self._stable_history: deque = deque(maxlen=2) # last 2 confirmed signs
 
         self._build_ui()
         self._apply_styles()
@@ -267,6 +277,17 @@ class ASLTranslatorApp(QMainWindow):
         self.video.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video.setMinimumSize(460, 340)
         layout.addWidget(self.video, stretch=1)
+
+        # Live sign indicator
+        live_row = QHBoxLayout()
+        live_lbl = QLabel("Live Sign:")
+        live_lbl.setObjectName("panelTitle")
+        live_row.addWidget(live_lbl)
+        self.live_sign_display = QLabel("—")
+        self.live_sign_display.setObjectName("liveSignDisplay")
+        live_row.addWidget(self.live_sign_display)
+        live_row.addStretch()
+        layout.addLayout(live_row)
 
         # Controls
         ctrl = QHBoxLayout()
@@ -357,6 +378,11 @@ class ASLTranslatorApp(QMainWindow):
         if self.recording:
             self.recorded_frames.append(frame.copy())
 
+        # Live detection: sample every 3rd frame to avoid lag
+        self._live_frame_count += 1
+        if self._live_frame_count % 3 == 0:
+            self._live_detect(frame)
+
     def _toggle_recording(self):
         if not self.recording:
             self.recording = True
@@ -399,7 +425,7 @@ class ASLTranslatorApp(QMainWindow):
             if landmarks is not None:
                 predicted_label, certainty, _ = self.recognizer.predict(landmarks)
                 print(f"  frame {i}: {predicted_label}  {certainty:.0f}%")
-                if predicted_label and certainty > 25:
+                if predicted_label and certainty > 50:
                     detected_signs.append((predicted_label, certainty))
         
         # Analyze detected signs
@@ -417,11 +443,71 @@ class ASLTranslatorApp(QMainWindow):
             
             self.signs.setText(f"{most_common_sign} ({avg_certainty:.0f}%)")
             self.footer.setText(f"Translation complete: '{most_common_sign}' detected")
+
+            self.sign_history.append(most_common_sign.lower())
+            self._check_sign_sequences()
             
         else:
             self.output.append("[No hand signs detected with sufficient confidence.]\n")
             self.signs.setText("No clear sign detected")
             self.footer.setText("No signs detected — try again with clearer hand positioning")
+
+    def _live_detect(self, frame: np.ndarray):
+        landmarks = self.recognizer.extract_landmarks(frame)
+        if landmarks is not None:
+            label, certainty, _ = self.recognizer.predict(landmarks)
+            if certainty > 35:
+                self._live_buffer.append(label)
+                self.live_sign_display.setText(f"{label.upper()}  {certainty:.0f}%")
+            else:
+                self._live_buffer.append(None)
+                self.live_sign_display.setText("—")
+        else:
+            self._live_buffer.append(None)
+            self.live_sign_display.setText("—")
+
+        # Need a full buffer before judging stability
+        if len(self._live_buffer) < self._live_buffer.maxlen:
+            return
+
+        from collections import Counter
+        non_null = [s for s in self._live_buffer if s is not None]
+        if not non_null:
+            return
+        top_sign, top_count = Counter(non_null).most_common(1)[0]
+
+        # Sign is "stable" when it dominates ≥70% of the buffer
+        if top_count / len(self._live_buffer) >= 0.55:
+            if top_sign != self._last_stable_sign:
+                self._last_stable_sign = top_sign
+                self._stable_history.append(top_sign)
+                self._live_buffer.clear()  # reset so next sign needs fresh frames
+                self.sign_history.append(top_sign.lower())
+                self._check_sign_sequences()
+                self._check_double_sign()
+
+    def _check_double_sign(self):
+        history = list(self._stable_history)
+        if len(history) == 2 and history[0] == history[1]:
+            sign = history[0]
+            print(f"DOUBLE SIGN: {sign} {sign} → ON")
+            self.output.append(f"<b>[Double sign: {sign.upper()} {sign.upper()}]</b>")
+            self.output.append("Triggered: ON\n")
+            self.footer.setText(f"Double sign '{sign.upper()}' detected → ON")
+            self._stable_history.clear()
+            self._last_stable_sign = None
+
+    def _check_sign_sequences(self):
+        history = list(self.sign_history)
+        for seq, message in SIGN_SEQUENCES.items():
+            n = len(seq)
+            if history[-n:] == list(seq):
+                print(f"SIGN SEQUENCE: {' → '.join(seq)}")
+                print(f"OUTPUT: {message}")
+                self.output.append(f"<b>[Sign sequence: {' → '.join(seq)}]</b>")
+                self.output.append(f"{message}\n")
+                self.sign_history.clear()
+                break
 
     def _handle_input(self):
         text = self.cmd_input.text().strip().lower()
@@ -543,6 +629,13 @@ class ASLTranslatorApp(QMainWindow):
                 font-size: 14px;
                 color: #222222;
                 line-height: 1.6;
+            }
+
+            QLabel#liveSignDisplay {
+                font-size: 18px;
+                font-weight: 700;
+                color: #111111;
+                padding: 2px 8px;
             }
 
             QLabel#signsBox {
