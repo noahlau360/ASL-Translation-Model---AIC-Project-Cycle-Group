@@ -201,7 +201,7 @@ TOGGLE_COMMANDS: dict[str, list[str]] = {
 # Sign sequence triggers: map a tuple of signs (in order) to a terminal message
 SIGN_SEQUENCES: dict[tuple, str] = {
     ("o", "n"): "Sequence detected: ON",
-    ("o", "c"): "yay",
+    ("o", "c"): "Sequence detected: LIGHT TOGGLE",
 }
 
 
@@ -544,6 +544,24 @@ class ASLTranslatorApp(QMainWindow):
                 self.output.append(f"<b>[Sign sequence: {' → '.join(seq)}]</b>")
                 self.output.append(f"{message}\n")
                 self.sign_history.clear()
+
+                # Trigger light toggle for O→C sequence
+                if seq == ("o", "c"):
+                    import time
+                    cooldown = 2.0
+                    if time.time() - self._last_command_time.get("light", 0) >= cooldown:
+                        self._last_command_time["light"] = time.time()
+                        states = TOGGLE_COMMANDS["light"]
+                        idx = self._toggle_index.get("light", 0)
+                        action = states[idx]
+                        self._toggle_index["light"] = (idx + 1) % len(states)
+                        self.footer.setText(f'Sending "{action}" to {DEVICE_NAME}…')
+                        self.output.append(f"Sending light {action}…\n")
+                        self.signs.setText("…")
+                        self._kasa_thread = KasaThread(action)
+                        self._kasa_thread.finished.connect(self._on_kasa_done)
+                        self._kasa_thread.start()
+
                 break
 
     def _handle_input(self):
