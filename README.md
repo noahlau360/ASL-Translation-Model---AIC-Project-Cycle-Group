@@ -24,7 +24,7 @@ By mapping specific recognized ASL signs to IoT network triggers (e.g., via Home
 - IoT Action Dispatcher: Translates validated high-confidence sign predictions into smart home device actions.
 - Model Serialization: Full persistence with joblib for re-loading trained estimators, feature schemas, and categorical label encoders during deployment.
 
-# 🛠️ Tech Stack
+# Tech Stack
 - Language: Python 3
 - Computer Vision: MediaPipe, OpenCV (cv2)
 - Data & Machine Learning: NumPy, Pandas, Scikit-Learn, JoblibSmart Home / Networking: MQTT / Requests / Home Assistant API (Integration Layer)
@@ -40,14 +40,3 @@ By mapping specific recognized ASL signs to IoT network triggers (e.g., via Home
 │   └── smart_home_bridge.py   # IoT command dispatcher / API handler \
 ├── README.md              # Project documentation \
 └── requirements.txt       # Dependencies \
-
-# Getting Started
-1. InstallationClone the repository and install required packages: \
-Bash \
-git clone https://github.com/your-org/asl-smarthome-translator.git \
-cd asl-smarthome-translator \
-pip install -r requirements.txt \
-3. Run Gesture Translation & Control \
-Execute the pipeline to evaluate an image/frame and send the corresponding command to your smart home setup: \
-Bash \
-python src/predict.py --image_path path/to/image.jpg --trigger_smarthome True
