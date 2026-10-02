@@ -30,7 +30,7 @@ By mapping specific recognized ASL signs to IoT network triggers (e.g., via Home
 - Data & Machine Learning: NumPy, Pandas, Scikit-Learn, JoblibSmart Home / Networking: MQTT / Requests / Home Assistant API (Integration Layer)
 - Visualization: Matplotlib
 
-# 📂 Project Structure
+# Project Structure
 ├── data/                  # Sample input images and dataset files \
 ├── models/                # Serialized model (.pkl), feature schemas, and label encoders \
 ├── notebooks/             # UW AIC Colab notebooks for training & experimentation \
@@ -41,7 +41,13 @@ By mapping specific recognized ASL signs to IoT network triggers (e.g., via Home
 ├── README.md              # Project documentation \
 └── requirements.txt       # Dependencies \
 
-🚀 Getting Started1. InstallationClone the repository and install required packages:Bashgit clone https://github.com/your-org/asl-smarthome-translator.git
-cd asl-smarthome-translator
-pip install -r requirements.txt
-2. Run Gesture Translation & ControlExecute the pipeline to evaluate an image/frame and send the corresponding command to your smart home setup:Bashpython src/predict.py --image_path path/to/image.jpg --trigger_smarthome True
+# Getting Started
+1. InstallationClone the repository and install required packages: \
+Bash \
+git clone https://github.com/your-org/asl-smarthome-translator.git \
+cd asl-smarthome-translator \
+pip install -r requirements.txt \
+3. Run Gesture Translation & Control \
+Execute the pipeline to evaluate an image/frame and send the corresponding command to your smart home setup: \
+Bash \
+python src/predict.py --image_path path/to/image.jpg --trigger_smarthome True
