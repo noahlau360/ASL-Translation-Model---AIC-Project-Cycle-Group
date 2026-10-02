@@ -31,15 +31,15 @@ By mapping specific recognized ASL signs to IoT network triggers (e.g., via Home
 - Visualization: Matplotlib
 
 # 📂 Project Structure
-├── data/                  # Sample input images and dataset files
-├── models/                # Serialized model (.pkl), feature schemas, and label encoders
-├── notebooks/             # UW AIC Colab notebooks for training & experimentation
-├── src/
-│   ├── landmark_extractor.py  # MediaPipe vision parsing
-│   ├── predict.py             # Model inference & confidence scoring
-│   └── smart_home_bridge.py   # IoT command dispatcher / API handler
-├── README.md              # Project documentation
-└── requirements.txt       # Dependencies
+├── data/                  # Sample input images and dataset files \
+├── models/                # Serialized model (.pkl), feature schemas, and label encoders \
+├── notebooks/             # UW AIC Colab notebooks for training & experimentation \
+├── src/ \
+│   ├── landmark_extractor.py  # MediaPipe vision parsing \
+│   ├── predict.py             # Model inference & confidence scoring \
+│   └── smart_home_bridge.py   # IoT command dispatcher / API handler \
+├── README.md              # Project documentation \
+└── requirements.txt       # Dependencies \
 
 🚀 Getting Started1. InstallationClone the repository and install required packages:Bashgit clone https://github.com/your-org/asl-smarthome-translator.git
 cd asl-smarthome-translator
